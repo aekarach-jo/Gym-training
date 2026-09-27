@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, CameraOff, ScanLine } from "lucide-react";
+import { Camera, CameraOff, ScanLine, Volume2 } from "lucide-react";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import type { Exercise } from "@/lib/exercises";
 import { advanceCameraRepetition, advanceHighKnees, advanceHold, advancePushUp, bridgeZones, highKneeZones, initialCameraRepState, initialHighKneeState, initialPushUpState, jumpingJackZones, kneePushUpZones, lungeZones, pauseCameraRepetition, pauseHighKnees, plankValid, pushUpZones, relativeBridgeLift, sidePlankValid, squatZones, type CameraRepState, type HighKneeState, type HoldState, type PushUpState } from "@/lib/motionRules";
@@ -17,7 +17,7 @@ function angle(a: Point, b: Point, c: Point) {
   return length ? (Math.acos(Math.max(-1, Math.min(1, dot / length))) * 180) / Math.PI : 0;
 }
 
-export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }: { exercise: Exercise; count: number; onCount: () => void; selectedSide?: "left" | "right" }) {
+export function CameraCoach({ exercise, count, onCount, selectedSide = "left", paused = false }: { exercise: Exercise; count: number; onCount: () => void; selectedSide?: "left" | "right"; paused?: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const stream = useRef<MediaStream | null>(null);
@@ -29,22 +29,75 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
   const highKneeState = useRef<HighKneeState>(initialHighKneeState);
   const holdState = useRef<HoldState>({ stable: 0, heldMs: 0, lastValidAt: null, lastGoodAt: null });
   const trackedSide = useRef<0 | 1 | null>(null);
+  const selectedSideRef = useRef(selectedSide);
   const live = useRef(false);
+  const pausedRef = useRef(paused);
   const requestToken = useRef(0);
   const callback = useRef(onCount);
+  const sound = useRef<AudioContext | null>(null);
+  const soundEnabledRef = useRef(true);
   const [status, setStatus] = useState<"idle" | "loading" | "waiting" | "active" | "error">("idle");
   const [feedback, setFeedback] = useState(`วางกล้อง${exercise.cameraAngle} ให้เห็นทั้งตัว`);
   const [error, setError] = useState("");
   const [showSkeleton, setShowSkeleton] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [detectedPoints, setDetectedPoints] = useState(-1);
   const [motionSignal, setMotionSignal] = useState<string | null>(null);
 
   useEffect(() => { callback.current = onCount; }, [onCount]);
 
+  const unlockSound = () => {
+    if (!window.AudioContext) return;
+    try {
+      const context = sound.current ?? new window.AudioContext();
+      sound.current = context;
+      if (context.state === "suspended") void context.resume().catch(() => {});
+    } catch { /* Sound is optional; camera counting continues. */ }
+  };
+
+  const beep = () => {
+    const context = sound.current;
+    if (!soundEnabledRef.current || !context || context.state !== "running") return;
+    try {
+      const startAt = context.currentTime;
+      const tone = context.createOscillator();
+      const volume = context.createGain();
+      tone.type = "sine";
+      tone.frequency.setValueAtTime(880, startAt);
+      volume.gain.setValueAtTime(0.0001, startAt);
+      volume.gain.exponentialRampToValueAtTime(0.14, startAt + 0.012);
+      volume.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.16);
+      tone.connect(volume);
+      volume.connect(context.destination);
+      tone.onended = () => { tone.disconnect(); volume.disconnect(); };
+      tone.start(startAt);
+      tone.stop(startAt + 0.17);
+    } catch { /* Never let audio interrupt a counted rep. */ }
+  };
+
+  const emitCount = (amount = 1) => {
+    if (amount <= 0) return;
+    for (let index = 0; index < amount; index++) callback.current();
+    beep();
+  };
+  useEffect(() => {
+    pausedRef.current = paused;
+    selectedSideRef.current = selectedSide;
+    repState.current = initialCameraRepState;
+    pushUpState.current = initialPushUpState;
+    highKneeState.current = initialHighKneeState;
+    holdState.current = { stable: 0, heldMs: 0, lastValidAt: null, lastGoodAt: null };
+    trackedSide.current = null;
+    lastFrame.current = 0;
+    const surface = canvas.current;
+    surface?.getContext("2d")?.clearRect(0, 0, surface.width, surface.height);
+  }, [paused, selectedSide]);
+
   const stop = useCallback(() => {
     requestToken.current += 1;
     live.current = false;
     window.cancelAnimationFrame(frame.current);
+    if (sound.current?.state === "running") void sound.current.suspend().catch(() => {});
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
     model.current = null;
@@ -64,6 +117,9 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     requestToken.current += 1;
     live.current = false;
     window.cancelAnimationFrame(frame.current);
+    const context = sound.current;
+    sound.current = null;
+    if (context) void context.close().catch(() => {});
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
     model.current = null;
@@ -123,7 +179,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     const previous = repState.current.phase;
     const next = advanceCameraRepetition(repState.current, top, bottom, now);
     repState.current = next;
-    if (next.counted) callback.current();
+    if (next.counted) emitCount();
     setFeedback(next.counted ? messages.next : previous === "find" && next.phase === "find" ? messages.start : next.phase === "bottom" ? messages.up : messages.down);
   };
 
@@ -143,7 +199,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
         const right = highKneeZones(points[26].y, points[24].y, points[28].y);
         const next = advanceHighKnees(highKneeState.current, left, right, now);
         highKneeState.current = next;
-        if (next.counted) callback.current();
+        if (next.counted) emitCount();
         setMotionSignal(`ขาซ้าย ${left.bottom ? "ยกสูง" : left.top ? "ลงพื้น" : "กำลังเคลื่อน"} · ขาขวา ${right.bottom ? "ยกสูง" : right.top ? "ลงพื้น" : "กำลังเคลื่อน"}`);
         setFeedback(next.counted ? "นับแล้ว! สลับยกเข่าอีกข้าง" : next.phase === "find" ? "วางเท้าทั้งสองข้างก่อนเริ่ม" : next.phase === "raised" ? "วางเท้าข้างที่ยกกลับพื้น" : "ยกเข่าสลับข้างใกล้ระดับสะโพก");
       }
@@ -157,7 +213,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     const right = requiredOffsets.reduce((sum, index) => sum + (points[rightIds[index]]?.visibility ?? 0), 0);
     const leftReady = requiredOffsets.every((index) => (points[leftIds[index]]?.visibility ?? 0) >= minimumVisibility);
     const rightReady = requiredOffsets.every((index) => (points[rightIds[index]]?.visibility ?? 0) >= minimumVisibility);
-    const side = exercise.bilateral ? (selectedSide === "left" ? 0 : 1)
+    const side = exercise.bilateral ? (selectedSideRef.current === "left" ? 0 : 1)
       : leftReady !== rightReady ? (leftReady ? 0 : 1)
         : trackedSide.current === null ? (left >= right ? 0 : 1)
         : left > right + 0.7 ? 0 : right > left + 0.7 ? 1 : trackedSide.current;
@@ -179,7 +235,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
       }
       const hold = advanceHold(holdState.current, true, now);
       holdState.current = hold;
-      for (let second = 0; second < hold.seconds; second++) callback.current();
+      emitCount(hold.seconds);
       setFeedback(hold.stable < 2 ? "รักษาท่านี้ไว้" : "ท่าถูกต้อง กำลังจับเวลา");
       return;
     }
@@ -216,12 +272,13 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     pushUpState.current = next;
     setMotionSignal(`มุมศอก ${Math.round(elbow)}° · ${next.phase === "find" ? "เหยียดแขนเพื่อเริ่ม" : next.phase === "top" ? "รอจังหวะลง" : "รอดันกลับขึ้น"}`);
     if (!zones.valid) { setFeedback("รักษาแนวไหล่ถึงสะโพกให้ตรงก่อนนับ"); return; }
-    if (next.counted) callback.current();
+    if (next.counted) emitCount();
     setFeedback(next.counted ? "นับแล้ว! ลงสำหรับครั้งถัดไป" : next.phase === "find" ? "เหยียดแขนเพื่อเริ่มนับ" : next.phase === "bottom" ? "ดีมาก ดันกลับขึ้นให้สุด" : "งอศอกลงให้ลึก แล้วดันกลับขึ้น");
   };
 
   const loop = (now: number) => {
     if (!live.current) return;
+    if (pausedRef.current) { frame.current = window.requestAnimationFrame(loop); return; }
     const player = video.current;
     if (player && model.current && player.readyState >= 2 && now - lastFrame.current >= 90) {
       lastFrame.current = now;
@@ -243,6 +300,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
   };
 
   const start = async () => {
+    if (soundEnabledRef.current) unlockSound();
     const token = ++requestToken.current;
     setStatus("loading");
     setDetectedPoints(-1);
@@ -294,6 +352,18 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
         <button type="button" role="switch" aria-label="แสดง Skeleton แบบเรียลไทม์" aria-checked={showSkeleton} className={`camera-visual-switch${showSkeleton ? " is-on" : ""}`} onClick={() => setShowSkeleton((current) => !current)}>
           <span className="camera-visual-switch__track"><span /></span>
           <span>{showSkeleton ? "เปิด" : "ปิด"}</span>
+        </button>
+      </div>
+      <div className="camera-visual-toggle">
+        <span><Volume2 size={15} /> เสียงเมื่อกล้องนับสำเร็จ</span>
+        <button type="button" role="switch" aria-label="เสียงเมื่อกล้องนับสำเร็จ" aria-checked={soundEnabled} className={`camera-visual-switch${soundEnabled ? " is-on" : ""}`} onClick={() => {
+          const enabled = !soundEnabledRef.current;
+          soundEnabledRef.current = enabled;
+          setSoundEnabled(enabled);
+          if (enabled) unlockSound();
+        }}>
+          <span className="camera-visual-switch__track"><span /></span>
+          <span>{soundEnabled ? "เปิด" : "ปิด"}</span>
         </button>
       </div>
       <div className="camera-screen">
