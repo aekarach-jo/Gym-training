@@ -52,7 +52,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left", p
     if (preview) setSoundFeedback("กำลังลองเสียง...");
     try {
       void playCountSound().then(() => {
-        if (preview) setSoundFeedback("เบราว์เซอร์เริ่มเล่นไฟล์เสียงแล้ว");
+        if (preview) setSoundFeedback("กำลังเล่นเสียงทดสอบ · ถ้ายังเงียบ ลองเพิ่มระดับเสียงสื่อบนโทรศัพท์");
       }).catch(() => {
         setSoundFeedback("เบราว์เซอร์เล่นเสียงไม่ได้ ลองกดปุ่มอีกครั้ง");
       });

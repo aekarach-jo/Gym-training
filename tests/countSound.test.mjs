@@ -13,20 +13,26 @@ test("count sound is a valid nonempty WAV asset", async () => {
 
 test("count and preview reuse the same browser audio element", async () => {
   const originalAudio = globalThis.Audio;
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
   const instances = [];
+  const audioSession = { type: "ambient" };
   class FakeAudio {
     constructor(src) { this.src = src; this.currentTime = 5; this.playCount = 0; instances.push(this); }
     play() { this.playCount += 1; return Promise.resolve(); }
   }
   globalThis.Audio = FakeAudio;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { audioSession } });
   try {
     await playCountSound();
     await playCountSound();
+    assert.equal(audioSession.type, "playback");
     assert.equal(instances.length, 1);
     assert.equal(instances[0].src, "/sounds/count-beep.wav");
     assert.equal(instances[0].playCount, 2);
     assert.equal(instances[0].currentTime, 0);
   } finally {
     globalThis.Audio = originalAudio;
+    if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator);
+    else delete globalThis.navigator;
   }
 });
