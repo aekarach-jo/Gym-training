@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, CameraOff, ScanLine, Volume2 } from "lucide-react";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import type { Exercise } from "@/lib/exercises";
+import { playCountBeep } from "@/lib/countSound";
 import { advanceCameraRepetition, advanceHighKnees, advanceHold, advancePushUp, bridgeZones, highKneeZones, initialCameraRepState, initialHighKneeState, initialPushUpState, jumpingJackZones, kneePushUpZones, lungeZones, pauseCameraRepetition, pauseHighKnees, plankValid, pushUpZones, relativeBridgeLift, sidePlankValid, squatZones, type CameraRepState, type HighKneeState, type HoldState, type PushUpState } from "@/lib/motionRules";
 import { createPoseModel } from "@/lib/poseModel";
 
@@ -46,33 +47,25 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left", p
 
   useEffect(() => { callback.current = onCount; }, [onCount]);
 
-  const unlockSound = () => {
-    if (!window.AudioContext) return;
+  const getSound = () => {
+    if (!window.AudioContext) return null;
     try {
-      const context = sound.current ?? new window.AudioContext();
+      const context = sound.current?.state === "closed" || !sound.current ? new window.AudioContext() : sound.current;
       sound.current = context;
-      if (context.state === "suspended") void context.resume().catch(() => {});
-    } catch { /* Sound is optional; camera counting continues. */ }
+      return context;
+    } catch { return null; }
+  };
+
+  const unlockSound = () => {
+    const context = getSound();
+    if (context && context.state !== "running") void context.resume().catch(() => {});
   };
 
   const beep = () => {
-    const context = sound.current;
-    if (!soundEnabledRef.current || !context || context.state !== "running") return;
-    try {
-      const startAt = context.currentTime;
-      const tone = context.createOscillator();
-      const volume = context.createGain();
-      tone.type = "sine";
-      tone.frequency.setValueAtTime(880, startAt);
-      volume.gain.setValueAtTime(0.0001, startAt);
-      volume.gain.exponentialRampToValueAtTime(0.14, startAt + 0.012);
-      volume.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.16);
-      tone.connect(volume);
-      volume.connect(context.destination);
-      tone.onended = () => { tone.disconnect(); volume.disconnect(); };
-      tone.start(startAt);
-      tone.stop(startAt + 0.17);
-    } catch { /* Never let audio interrupt a counted rep. */ }
+    if (!soundEnabledRef.current) return;
+    const context = getSound();
+    if (!context) return;
+    try { playCountBeep(context); } catch { /* Never let audio interrupt a counted rep. */ }
   };
 
   const emitCount = (amount = 1) => {
@@ -97,7 +90,6 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left", p
     requestToken.current += 1;
     live.current = false;
     window.cancelAnimationFrame(frame.current);
-    if (sound.current?.state === "running") void sound.current.suspend().catch(() => {});
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
     model.current = null;
@@ -119,7 +111,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left", p
     window.cancelAnimationFrame(frame.current);
     const context = sound.current;
     sound.current = null;
-    if (context) void context.close().catch(() => {});
+    if (context) window.setTimeout(() => { void context.close().catch(() => {}); }, 400);
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
     model.current = null;
@@ -356,15 +348,18 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left", p
       </div>
       <div className="camera-visual-toggle">
         <span><Volume2 size={15} /> เสียงเมื่อกล้องนับสำเร็จ</span>
-        <button type="button" role="switch" aria-label="เสียงเมื่อกล้องนับสำเร็จ" aria-checked={soundEnabled} className={`camera-visual-switch${soundEnabled ? " is-on" : ""}`} onClick={() => {
-          const enabled = !soundEnabledRef.current;
-          soundEnabledRef.current = enabled;
-          setSoundEnabled(enabled);
-          if (enabled) unlockSound();
-        }}>
-          <span className="camera-visual-switch__track"><span /></span>
-          <span>{soundEnabled ? "เปิด" : "ปิด"}</span>
-        </button>
+        <div className="camera-sound-controls">
+          <button type="button" className="camera-sound-test" onClick={() => { unlockSound(); beep(); }} disabled={!soundEnabled}>ลองเสียง</button>
+          <button type="button" role="switch" aria-label="เสียงเมื่อกล้องนับสำเร็จ" aria-checked={soundEnabled} className={`camera-visual-switch${soundEnabled ? " is-on" : ""}`} onClick={() => {
+            const enabled = !soundEnabledRef.current;
+            soundEnabledRef.current = enabled;
+            setSoundEnabled(enabled);
+            if (enabled) unlockSound();
+          }}>
+            <span className="camera-visual-switch__track"><span /></span>
+            <span>{soundEnabled ? "เปิด" : "ปิด"}</span>
+          </button>
+        </div>
       </div>
       <div className="camera-screen">
         <video ref={video} playsInline muted aria-label="ภาพสดจากกล้อง" />

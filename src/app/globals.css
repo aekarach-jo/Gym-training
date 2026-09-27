@@ -75,6 +75,9 @@ button:disabled{cursor:not-allowed;opacity:.55}
 .exercise-art--paused .exercise-art__frame{animation-play-state:paused}
 .camera-visual-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 9px;color:#5d765f;font-size:11px;font-weight:800}
 .camera-visual-toggle>span{display:inline-flex;align-items:center;gap:5px}
+.camera-sound-controls{display:flex;align-items:center;gap:10px}
+.camera-sound-test{border:0;background:#e3f2d8;color:#315e39;border-radius:6px;padding:5px 7px;font:inherit;font-size:10px;font-weight:900;white-space:nowrap}
+.camera-sound-test:disabled{opacity:.45;cursor:not-allowed}
 .camera-visual-switch{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;color:#819184;font:inherit;font-size:11px;font-weight:900;cursor:pointer;padding:3px 0;white-space:nowrap}
 .camera-visual-switch.is-on{color:#356b3b}
 .camera-visual-switch__track{display:flex;align-items:center;width:32px;height:19px;border-radius:20px;background:#cbd5ca;padding:2px;transition:background .2s}
