@@ -1,19 +1,13 @@
-export function playCountBeep(context: AudioContext) {
-  const startAt = context.currentTime;
-  const tone = context.createOscillator();
-  const volume = context.createGain();
-  tone.type = "sine";
-  tone.frequency.setValueAtTime(880, startAt);
-  tone.frequency.exponentialRampToValueAtTime(1046, startAt + 0.1);
-  volume.gain.setValueAtTime(0.0001, startAt);
-  volume.gain.exponentialRampToValueAtTime(0.38, startAt + 0.015);
-  volume.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.23);
-  tone.connect(volume);
-  volume.connect(context.destination);
-  tone.onended = () => { tone.disconnect(); volume.disconnect(); };
-  tone.start(startAt);
-  tone.stop(startAt + 0.24);
-  // Starting the oscillator after user interaction can unlock a suspended
-  // context. Resume as well so the scheduled sound is not silently skipped.
-  if (context.state !== "running") void context.resume().catch(() => {});
+let countAudio: HTMLAudioElement | null = null;
+
+export function playCountSound(): Promise<void> {
+  if (typeof Audio === "undefined") return Promise.reject(new Error("Audio playback is unavailable"));
+  if (!countAudio) {
+    countAudio = new Audio("/sounds/count-beep.wav");
+    countAudio.preload = "auto";
+  }
+  countAudio.muted = false;
+  countAudio.volume = 1;
+  try { countAudio.currentTime = 0; } catch { /* Playback still works while metadata loads. */ }
+  return countAudio.play();
 }

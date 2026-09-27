@@ -1,48 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { playCountBeep } from "../src/lib/countSound.ts";
+import { readFile } from "node:fs/promises";
+import { playCountSound } from "../src/lib/countSound.ts";
 
-function fakeAudioContext(state) {
-  const events = [];
-  const tone = {
-    frequency: {
-      setValueAtTime: () => {},
-      exponentialRampToValueAtTime: () => {},
-    },
-    connect: () => {},
-    disconnect: () => {},
-    start: () => events.push("start"),
-    stop: () => events.push("stop"),
-  };
-  const volume = {
-    gain: {
-      setValueAtTime: () => {},
-      exponentialRampToValueAtTime: () => {},
-    },
-    connect: () => {},
-    disconnect: () => {},
-  };
-  return {
-    events,
-    context: {
-      currentTime: 10,
-      state,
-      destination: {},
-      createOscillator: () => tone,
-      createGain: () => volume,
-      resume: () => { events.push("resume"); return Promise.resolve(); },
-    },
-  };
-}
-
-test("beep starts and resumes audio even when the browser suspended it", () => {
-  const { context, events } = fakeAudioContext("suspended");
-  playCountBeep(context);
-  assert.deepEqual(events, ["start", "stop", "resume"]);
+test("count sound is a valid nonempty WAV asset", async () => {
+  const sound = await readFile(new URL("../public/sounds/count-beep.wav", import.meta.url));
+  assert.equal(sound.toString("ascii", 0, 4), "RIFF");
+  assert.equal(sound.toString("ascii", 8, 12), "WAVE");
+  assert.ok(sound.length > 10000);
+  assert.ok(sound.subarray(44).some((sample) => sample !== 0));
 });
 
-test("beep plays immediately when audio is already running", () => {
-  const { context, events } = fakeAudioContext("running");
-  playCountBeep(context);
-  assert.deepEqual(events, ["start", "stop"]);
+test("count and preview reuse the same browser audio element", async () => {
+  const originalAudio = globalThis.Audio;
+  const instances = [];
+  class FakeAudio {
+    constructor(src) { this.src = src; this.currentTime = 5; this.playCount = 0; instances.push(this); }
+    play() { this.playCount += 1; return Promise.resolve(); }
+  }
+  globalThis.Audio = FakeAudio;
+  try {
+    await playCountSound();
+    await playCountSound();
+    assert.equal(instances.length, 1);
+    assert.equal(instances[0].src, "/sounds/count-beep.wav");
+    assert.equal(instances[0].playCount, 2);
+    assert.equal(instances[0].currentTime, 0);
+  } finally {
+    globalThis.Audio = originalAudio;
+  }
 });
