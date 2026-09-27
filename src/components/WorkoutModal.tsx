@@ -12,6 +12,7 @@ type WorkoutStage = "training" | "rest" | "complete";
 
 type Props = {
   exercise: Exercise;
+  note?: string;
   entries: SetEntry[];
   onClose: () => void;
   onSave: (value: number, source: SetEntry["source"], side?: SetEntry["side"]) => void;
@@ -30,7 +31,7 @@ function RestCountdown({ remaining, total, nextSet, onSkip }: { remaining: numbe
   </div>;
 }
 
-export function WorkoutModal({ exercise, entries, onClose, onSave }: Props) {
+export function WorkoutModal({ exercise, note, entries, onClose, onSave }: Props) {
   const [value, setValue] = useState(0);
   const [mode, setMode] = useState<"manual" | "camera">("manual");
   const [side, setSide] = useState<Side>(() => entries.filter((entry) => entry.side === "left").length > entries.filter((entry) => entry.side === "right").length ? "right" : "left");
@@ -125,6 +126,7 @@ export function WorkoutModal({ exercise, entries, onClose, onSave }: Props) {
           <p>{exercise.cue}</p>
           <div className="workout-illustration"><ExerciseArt exercise={exercise} size="large" /></div>
           <div className="form-tip"><Sparkles size={18} /> {exercise.steps[1]}</div>
+          {note && <div className="workout-note"><strong>โน้ตของฉัน</strong><span>{note}</span></div>}
         </div>
         <div className="workout-controls">
           <div className="control-head"><span>เป้าหมายเซตนี้</span><strong>{exercise.target} {exercise.unit}{exercise.bilateral ? " / ข้าง" : ""}</strong></div>

@@ -20,7 +20,7 @@ export function PlanBuilder({ initial, history = [], onSave, onCancel }: { initi
   const [error, setError] = useState("");
   const available = exercises.filter((exercise) => !items.some((item) => item.exerciseId === exercise.id));
 
-  const updateItem = (id: ExerciseId, field: "sets" | "target" | "rest", value: number) => {
+  const updateItem = (id: ExerciseId, field: "sets" | "target" | "rest" | "note", value: number | string) => {
     setItems((current) => current.map((item) => item.exerciseId === id ? { ...item, [field]: value } : item));
   };
   const move = (index: number, delta: number) => {
@@ -31,7 +31,7 @@ export function PlanBuilder({ initial, history = [], onSave, onCancel }: { initi
     setItems(next);
   };
   const save = () => {
-    const plan = { name: name.trim(), trainingDays: [...days].sort(), items };
+    const plan = { id: initial?.id ?? `custom-${crypto.randomUUID()}`, name: name.trim(), trainingDays: [...days].sort(), items };
     if (!validCustomPlan(plan)) { setError("กรุณาตั้งชื่อ เลือกวันและท่าฝึก แล้วตรวจจำนวนเซต (ท่าสลับข้างต้องเป็นเลขคู่) เป้าหมาย และเวลาพักให้อยู่ในช่วงที่กำหนด"); return; }
     onSave(plan);
   };
@@ -46,6 +46,7 @@ export function PlanBuilder({ initial, history = [], onSave, onCancel }: { initi
         <div className="plan-builder__items">{items.map((item, index) => { const exercise = byId(item.exerciseId); const last = history.filter((entry) => entry.exerciseId === item.exerciseId).sort((a, b) => b.at.localeCompare(a.at))[0]; return <div className="plan-builder__item" key={item.exerciseId}>
           <div className="plan-builder__item-top"><span className="plan-builder__number">{String(index + 1).padStart(2, "0")}</span><span className="plan-builder__art"><ExerciseArt exercise={exercise} /></span><div><strong>{exercise.name}</strong><small>{exercise.muscles}{exercise.bilateral ? " · สลับซ้าย–ขวา" : ""}</small>{last && <small className="plan-builder__last">เซตล่าสุด {last.value} {exercise.unit}</small>}</div><div className="plan-builder__item-actions"><button type="button" onClick={() => move(index, -1)} disabled={index === 0} aria-label={`เลื่อน${exercise.name}ขึ้น`}><ArrowUp size={16} /></button><button type="button" onClick={() => move(index, 1)} disabled={index === items.length - 1} aria-label={`เลื่อน${exercise.name}ลง`}><ArrowDown size={16} /></button><button type="button" onClick={() => setItems((current) => current.filter((row) => row.exerciseId !== item.exerciseId))} aria-label={`ลบ${exercise.name}`}><Trash2 size={16} /></button></div></div>
           <div className="plan-builder__fields"><label>เซตทั้งหมด<input type="number" min={exercise.bilateral ? 2 : 1} max={12} step={exercise.bilateral ? 2 : 1} value={item.sets} onChange={(event) => updateItem(item.exerciseId, "sets", Number(event.target.value))} /></label><label>เป้าหมาย / เซต <small>{exercise.unit}</small><input type="number" min={1} max={300} value={item.target} onChange={(event) => updateItem(item.exerciseId, "target", Number(event.target.value))} /></label><label>พัก <small>วินาที</small><input type="number" min={0} max={600} step={5} value={item.rest} onChange={(event) => updateItem(item.exerciseId, "rest", Number(event.target.value))} /></label></div>
+          <label className="plan-builder__note">โน้ตสำหรับท่านี้<input maxLength={180} value={item.note ?? ""} onChange={(event) => updateItem(item.exerciseId, "note", event.target.value)} placeholder="เช่น คุมจังหวะลงช้า ๆ" /></label>
         </div>; })}</div>
         {available.length > 0 && <div className="plan-builder__add"><select aria-label="เลือกท่าที่จะเพิ่ม" value={addId} onChange={(event) => setAddId(event.target.value as ExerciseId)}><option value="">เลือกท่าเพิ่มในแผน</option>{available.map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.name} · {exercise.category}</option>)}</select><button type="button" onClick={() => { if (!addId) return; const exercise = byId(addId); setItems((current) => [...current, { exerciseId: addId, sets: exercise.sets, target: exercise.target, rest: exercise.rest }]); setAddId(""); }} disabled={!addId}><Plus size={18} /> เพิ่มท่า</button></div>}
       </div>

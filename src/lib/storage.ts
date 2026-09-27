@@ -3,8 +3,8 @@ import { plans, type CustomPlan, type PlanId } from "./plans.ts";
 
 export type SetEntry = { id: string; exerciseId: ExerciseId; value: number; source: "manual" | "camera" | "timer"; at: string; side?: "left" | "right" };
 export type WeightEntry = { id: string; date: string; kg: number };
-export type TrainingData = { version: 3; entries: SetEntry[]; challengeGoal: number; activePlanId: PlanId | "custom"; customPlan: CustomPlan | null; weights: WeightEntry[]; weightGoalKg: number | null };
-export const initialData: TrainingData = { version: 3, entries: [], challengeGoal: 10, activePlanId: "starter", customPlan: null, weights: [], weightGoalKg: null };
+export type TrainingData = { version: 4; entries: SetEntry[]; challengeGoal: number; activePlanId: PlanId | string; customPlans: CustomPlan[]; weights: WeightEntry[]; weightGoalKg: number | null };
+export const initialData: TrainingData = { version: 4, entries: [], challengeGoal: 10, activePlanId: "starter", customPlans: [], weights: [], weightGoalKg: null };
 const key = "gym-training-personal-v1";
 const exerciseIds = new Set(exercises.map((exercise) => exercise.id));
 const planIds = new Set(plans.map((plan) => plan.id));
@@ -29,7 +29,8 @@ function validWeight(value: unknown): value is WeightEntry {
 export function validCustomPlan(value: unknown): value is CustomPlan {
   if (!value || typeof value !== "object") return false;
   const plan = value as Partial<CustomPlan>;
-  if (typeof plan.name !== "string" || !plan.name.trim() || plan.name.length > 40
+  if (typeof plan.id !== "string" || !/^custom-[a-zA-Z0-9-]{1,80}$/.test(plan.id)
+    || typeof plan.name !== "string" || !plan.name.trim() || plan.name.length > 40
     || !Array.isArray(plan.trainingDays) || !plan.trainingDays.length
     || new Set(plan.trainingDays).size !== plan.trainingDays.length
     || !plan.trainingDays.every((day) => Number.isInteger(day) && day >= 0 && day <= 6)
@@ -39,7 +40,8 @@ export function validCustomPlan(value: unknown): value is CustomPlan {
     if (!item || typeof item !== "object" || !exerciseIds.has(item.exerciseId) || ids.has(item.exerciseId)
       || !Number.isInteger(item.sets) || item.sets < 1 || item.sets > 12
       || !Number.isInteger(item.target) || item.target < 1 || item.target > 300
-      || !Number.isInteger(item.rest) || item.rest < 0 || item.rest > 600) return false;
+      || !Number.isInteger(item.rest) || item.rest < 0 || item.rest > 600
+      || (item.note !== undefined && (typeof item.note !== "string" || item.note.length > 180))) return false;
     if (exercises.find((exercise) => exercise.id === item.exerciseId)?.bilateral && item.sets % 2 !== 0) return false;
     ids.add(item.exerciseId);
     return true;
@@ -48,20 +50,31 @@ export function validCustomPlan(value: unknown): value is CustomPlan {
 
 function normalize(value: unknown, strict: boolean): TrainingData | null {
   if (!value || typeof value !== "object") return null;
-  const input = value as Omit<Partial<TrainingData>, "version"> & { version?: number };
-  if (![1, 2, 3].includes(input.version ?? 0) || !Array.isArray(input.entries)) return null;
-  if (strict && (!input.entries.every(validEntry) || (input.version !== 1 && (!Array.isArray(input.weights) || !input.weights.every(validWeight)))
-    || (input.version === 3 && input.customPlan != null && !validCustomPlan(input.customPlan)))) return null;
+  const input = value as Record<string, unknown>;
+  if (![1, 2, 3, 4].includes(input.version as number) || !Array.isArray(input.entries)) return null;
+  if (strict && (!input.entries.every(validEntry) || (input.version !== 1 && (!Array.isArray(input.weights) || !input.weights.every(validWeight))))) return null;
+
+  let customPlans: CustomPlan[] = [];
+  if (input.version === 4) {
+    if (!Array.isArray(input.customPlans) || input.customPlans.length > 100 || (strict && !input.customPlans.every(validCustomPlan))) return null;
+    customPlans = input.customPlans.filter(validCustomPlan);
+    if (new Set(customPlans.map((plan) => plan.id)).size !== customPlans.length) return null;
+  } else if (input.version === 3 && input.customPlan != null) {
+    const legacy = { ...(input.customPlan as object), id: "custom-legacy" };
+    if (strict && !validCustomPlan(legacy)) return null;
+    if (validCustomPlan(legacy)) customPlans = [legacy];
+  }
+
   const entries = input.entries.filter(validEntry);
   const weights = (Array.isArray(input.weights) ? input.weights : []).filter(validWeight).sort((a, b) => a.date.localeCompare(b.date));
   const goal = Number(input.weightGoalKg);
-  const customPlan = validCustomPlan(input.customPlan) ? input.customPlan : null;
+  const requestedPlan = input.activePlanId === "custom" && input.version === 3 ? "custom-legacy" : input.activePlanId;
+  const activePlanId = customPlans.some((plan) => plan.id === requestedPlan) ? requestedPlan as string
+    : planIds.has(requestedPlan as PlanId) ? requestedPlan as PlanId : "starter";
   return {
-    version: 3, entries,
+    version: 4, entries,
     challengeGoal: Number.isFinite(input.challengeGoal) ? Math.max(1, Math.min(100, Math.round(Number(input.challengeGoal)))) : 10,
-    activePlanId: input.activePlanId === "custom" && customPlan ? "custom" : planIds.has(input.activePlanId as PlanId) ? input.activePlanId as PlanId : "starter",
-    customPlan,
-    weights,
+    activePlanId, customPlans, weights,
     weightGoalKg: input.weightGoalKg != null && goal >= 20 && goal <= 500 ? goal : null,
   };
 }
