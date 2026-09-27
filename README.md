@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FORM. — Gym Training ส่วนตัว
 
-## Getting Started
+เว็บฝึกออกกำลังกายส่วนตัวด้วย Next.js: แผนฝึก 3 แบบ, ท่าบอดี้เวต 9 ท่า, ภาพการ์ตูนสาธิต, กล้องช่วยนับและจับเวลาทุกท่า, ชาเลนจ์รายวัน, ประวัติการฝึก, กราฟติดตามน้ำหนัก และสำรองข้อมูลเป็นไฟล์ JSON
 
-First, run the development server:
+## รันบนเครื่อง
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+เปิด http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## ตรวจสอบก่อน deploy
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+npm run build
+```
 
-## Learn More
+Deploy โครงการ Next.js นี้บน Vercel ได้โดยใช้ค่าเริ่มต้น ไม่ต้องตั้ง environment variable หรือฐานข้อมูล เว็บจะได้ HTTPS จาก Vercel โดยอัตโนมัติ ส่วนกล้องต้องเปิดผ่าน HTTPS หรือ localhost และผู้ใช้ต้องอนุญาตสิทธิ์กล้องในเบราว์เซอร์
 
-To learn more about Next.js, take a look at the following resources:
+## ข้อมูลและกล้อง
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- ประวัติการฝึก แผนที่เลือก เป้าหมายชาเลนจ์ และน้ำหนักเก็บใน localStorage ของเบราว์เซอร์นี้เท่านั้น
+- ข้อมูลรุ่นเดิมจะถูกย้ายไปโครงสร้างใหม่อัตโนมัติเมื่อเปิดเว็บ; ไฟล์สำรองรุ่นเดิมยังนำเข้าได้
+- ใช้เมนู **ตั้งค่า → ส่งออกข้อมูล** เพื่อสำรอง และ **นำเข้าข้อมูล** เพื่อกู้คืนหรือย้ายเครื่อง
+- กล้องและการประมวลผลท่าทำบนอุปกรณ์ด้วย MediaPipe; เว็บไม่บันทึกวิดีโอ
+- ตัวช่วยกล้องรองรับทั้ง 9 ท่า โดยหน้าฝึกระบุมุมกล้องที่ควรวาง ท่าวิดพื้น สควอต ลันจ์ และสะพานยกสะโพกใช้มุมด้านข้าง; กระโดดตบ ยกเข่าสูง และแพลงก์ข้างใช้มุมด้านหน้า
+- ท่าลันจ์และแพลงก์ข้างบันทึกแยกซ้าย–ขวา; จำนวนครั้งจากกล้องแก้ไขได้ก่อนบันทึกเซต
+- การประเมินจากกล้องอาจคลาดเคลื่อนตามแสง มุม และการบังของร่างกาย และยังไม่ผ่านการทดสอบด้วยผู้ใช้งานจริงทุกท่า
+- โมเดลและไฟล์ WASM อยู่ใน `public/` เพื่อให้ระบบกล้องไม่ต้องพึ่ง CDN ขณะใช้งาน
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+ภาพการ์ตูนสาธิตใน `public/exercises/` สร้างขึ้นใหม่สำหรับโครงการนี้
 
-## Deploy on Vercel
+## ที่มาท่าฝึก
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+รายละเอียดท่าฝึกอ้างอิงจากคลังท่า [ACE Exercise Library](https://www.acefitness.org/resources/everyone/exercise-library/equipment/no-equipment/) และคำแนะนำการออกกำลังกายที่บ้านของ [ACE](https://www.acefitness.org/resources/everyone/blog/7556/at-home-exercise-routines-for-busy-parents/)
+# Gym-training
