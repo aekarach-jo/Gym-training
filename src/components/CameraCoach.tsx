@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, CameraOff, ScanLine } from "lucide-react";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import type { Exercise } from "@/lib/exercises";
-import { advanceHold, advanceRepetition, bridgeZones, highKneeZones, jumpingJackZones, kneePushUpZones, lungeZones, plankValid, pushUpZones, sidePlankValid, squatZones, type RepPhase } from "@/lib/motionRules";
+import { advanceCameraRepetition, advanceHighKnees, advanceHold, advancePushUp, bridgeZones, highKneeZones, initialCameraRepState, initialHighKneeState, initialPushUpState, jumpingJackZones, kneePushUpZones, lungeZones, pauseCameraRepetition, pauseHighKnees, plankValid, pushUpZones, relativeBridgeLift, sidePlankValid, squatZones, type CameraRepState, type HighKneeState, type HoldState, type PushUpState } from "@/lib/motionRules";
 import { createPoseModel } from "@/lib/poseModel";
 
 type Point = { x: number; y: number; visibility?: number };
@@ -24,20 +24,20 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
   const model = useRef<PoseLandmarker | null>(null);
   const frame = useRef<number>(0);
   const lastFrame = useRef(0);
-  const phase = useRef<RepPhase>("find");
-  const stable = useRef(0);
-  const heldMs = useRef(0);
-  const lastValidAt = useRef<number | null>(null);
+  const repState = useRef<CameraRepState>(initialCameraRepState);
+  const pushUpState = useRef<PushUpState>(initialPushUpState);
+  const highKneeState = useRef<HighKneeState>(initialHighKneeState);
+  const holdState = useRef<HoldState>({ stable: 0, heldMs: 0, lastValidAt: null, lastGoodAt: null });
+  const trackedSide = useRef<0 | 1 | null>(null);
   const live = useRef(false);
   const requestToken = useRef(0);
-  const activeHighLeg = useRef<"left" | "right" | null>(null);
-  const lastHighLeg = useRef<"left" | "right" | null>(null);
   const callback = useRef(onCount);
   const [status, setStatus] = useState<"idle" | "loading" | "waiting" | "active" | "error">("idle");
   const [feedback, setFeedback] = useState(`วางกล้อง${exercise.cameraAngle} ให้เห็นทั้งตัว`);
   const [error, setError] = useState("");
   const [showSkeleton, setShowSkeleton] = useState(true);
   const [detectedPoints, setDetectedPoints] = useState(-1);
+  const [motionSignal, setMotionSignal] = useState<string | null>(null);
 
   useEffect(() => { callback.current = onCount; }, [onCount]);
 
@@ -49,13 +49,13 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     stream.current = null;
     model.current?.close();
     model.current = null;
-    phase.current = "find";
-    stable.current = 0;
-    heldMs.current = 0;
-    lastValidAt.current = null;
-    activeHighLeg.current = null;
-    lastHighLeg.current = null;
+    repState.current = initialCameraRepState;
+    pushUpState.current = initialPushUpState;
+    highKneeState.current = initialHighKneeState;
+    holdState.current = { stable: 0, heldMs: 0, lastValidAt: null, lastGoodAt: null };
+    trackedSide.current = null;
     setDetectedPoints(-1);
+    setMotionSignal(null);
     setStatus("idle");
     setFeedback(`วางกล้อง${exercise.cameraAngle} ให้เห็นทั้งตัว`);
   }, [exercise.cameraAngle]);
@@ -106,19 +106,21 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     }
   };
 
-  const pauseTracking = (message: string) => {
-    stable.current = 0;
-    lastValidAt.current = null;
-    if (exercise.unit !== "วินาที") phase.current = "find";
-    activeHighLeg.current = null;
+  const pauseTracking = (message: string, now: number, missingPoints = true) => {
+    repState.current = pauseCameraRepetition(repState.current, now);
+    highKneeState.current = pauseHighKnees(highKneeState.current, now);
+    holdState.current = advanceHold(holdState.current, false, now);
+    if (exercise.id === "push-up" || exercise.id === "knee-push-up") {
+      pushUpState.current = advancePushUp(pushUpState.current, null, false, now);
+    }
+    if (missingPoints) setMotionSignal("จับข้อต่อไม่ชัด · ลองถอยกล้องหรือเพิ่มแสง");
     setFeedback(message);
   };
 
-  const processRepetition = (top: boolean, bottom: boolean, messages: { start: string; down: string; up: string; next: string }) => {
-    const previous = phase.current;
-    const next = advanceRepetition({ phase: previous, stable: stable.current }, top, bottom);
-    phase.current = next.phase;
-    stable.current = next.stable;
+  const processRepetition = (top: boolean, bottom: boolean, now: number, messages: { start: string; down: string; up: string; next: string }) => {
+    const previous = repState.current.phase;
+    const next = advanceCameraRepetition(repState.current, top, bottom, now);
+    repState.current = next;
     if (next.counted) callback.current();
     setFeedback(next.counted ? messages.next : previous === "find" && next.phase === "find" ? messages.start : next.phase === "bottom" ? messages.up : messages.down);
   };
@@ -127,54 +129,54 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     draw(points);
     if (exercise.id === "jumping-jack" || exercise.id === "high-knees") {
       const needed = exercise.id === "jumping-jack" ? [11, 12, 15, 16, 23, 24, 27, 28] : [23, 24, 25, 26, 27, 28];
-      if (needed.some((id) => !points[id] || (points[id].visibility ?? 0) < 0.45)) { pauseTracking("ให้กล้องเห็นแขน ขา และเท้าทั้งสองข้าง"); return; }
+      if (needed.some((id) => !points[id] || (points[id].visibility ?? 0) < 0.4)) { pauseTracking("ให้กล้องเห็นแขน ขา และเท้าทั้งสองข้าง", now); return; }
       if (exercise.id === "jumping-jack") {
         const shoulderWidth = Math.abs(points[11].x - points[12].x);
         const ankleWidth = Math.abs(points[27].x - points[28].x);
-        const zones = jumpingJackZones(points[15].y < points[11].y - 0.04 && points[16].y < points[12].y - 0.04, points[15].y > points[23].y && points[16].y > points[24].y, ankleWidth, shoulderWidth);
-        processRepetition(zones.top, zones.bottom, { start: "ยืนเท้าชิด แขนลงข้างตัว", down: "กางเท้าและยกแขนให้สูงขึ้น", up: "หุบเท้าพร้อมลดแขนลง", next: "นับแล้ว! เริ่มครั้งถัดไป" });
+        const zones = jumpingJackZones(points[15].y < points[11].y - 0.02 && points[16].y < points[12].y - 0.02, points[15].y > points[23].y - 0.06 && points[16].y > points[24].y - 0.06, ankleWidth, shoulderWidth);
+        setMotionSignal(`ระยะเท้า ${Math.round((ankleWidth / Math.max(shoulderWidth, 0.01)) * 10) / 10} เท่าของไหล่`);
+        processRepetition(zones.top, zones.bottom, now, { start: "ยืนเท้าชิด แขนลงข้างตัว", down: "กางเท้าและยกแขนให้สูงขึ้น", up: "หุบเท้าพร้อมลดแขนลง", next: "นับแล้ว! เริ่มครั้งถัดไป" });
       } else {
         const left = highKneeZones(points[25].y, points[23].y, points[27].y);
         const right = highKneeZones(points[26].y, points[24].y, points[28].y);
-        if (!activeHighLeg.current) {
-          if (left.bottom && lastHighLeg.current !== "left") activeHighLeg.current = "left";
-          else if (right.bottom && lastHighLeg.current !== "right") activeHighLeg.current = "right";
-        }
-        const leg = activeHighLeg.current;
-        const zones = leg === "left" ? left : leg === "right" ? right : { top: left.top && right.top, bottom: false };
-        const before = phase.current;
-        const next = advanceRepetition({ phase: before, stable: stable.current }, zones.top, zones.bottom);
-        phase.current = next.phase; stable.current = next.stable;
-        if (next.counted && leg) { callback.current(); lastHighLeg.current = leg; activeHighLeg.current = null; }
-        setFeedback(next.counted ? "นับแล้ว! สลับยกเข่าอีกข้าง" : before === "bottom" ? "วางเท้ากลับพื้นให้สุด" : "ยกเข่าขึ้นใกล้ระดับสะโพก");
+        const next = advanceHighKnees(highKneeState.current, left, right, now);
+        highKneeState.current = next;
+        if (next.counted) callback.current();
+        setMotionSignal(`ขาซ้าย ${left.bottom ? "ยกสูง" : left.top ? "ลงพื้น" : "กำลังเคลื่อน"} · ขาขวา ${right.bottom ? "ยกสูง" : right.top ? "ลงพื้น" : "กำลังเคลื่อน"}`);
+        setFeedback(next.counted ? "นับแล้ว! สลับยกเข่าอีกข้าง" : next.phase === "find" ? "วางเท้าทั้งสองข้างก่อนเริ่ม" : next.phase === "raised" ? "วางเท้าข้างที่ยกกลับพื้น" : "ยกเข่าสลับข้างใกล้ระดับสะโพก");
       }
       return;
     }
     const requiredOffsets = exercise.id === "squat" || exercise.id === "forward-lunge" ? [0, 3, 4, 5] : exercise.id === "glute-bridge" || exercise.id === "knee-push-up" ? [0, 1, 2, 3, 4] : [0, 1, 2, 3, 4, 5];
     const leftIds = [11, 13, 15, 23, 25, 27];
     const rightIds = [12, 14, 16, 24, 26, 28];
+    const minimumVisibility = 0.4;
     const left = requiredOffsets.reduce((sum, index) => sum + (points[leftIds[index]]?.visibility ?? 0), 0);
     const right = requiredOffsets.reduce((sum, index) => sum + (points[rightIds[index]]?.visibility ?? 0), 0);
-    const side = exercise.bilateral ? (selectedSide === "left" ? 0 : 1) : left >= right ? 0 : 1;
+    const leftReady = requiredOffsets.every((index) => (points[leftIds[index]]?.visibility ?? 0) >= minimumVisibility);
+    const rightReady = requiredOffsets.every((index) => (points[rightIds[index]]?.visibility ?? 0) >= minimumVisibility);
+    const side = exercise.bilateral ? (selectedSide === "left" ? 0 : 1)
+      : leftReady !== rightReady ? (leftReady ? 0 : 1)
+        : trackedSide.current === null ? (left >= right ? 0 : 1)
+        : left > right + 0.7 ? 0 : right > left + 0.7 ? 1 : trackedSide.current;
+    trackedSide.current = side;
     const ids = side === 0 ? leftIds : rightIds;
-    if (requiredOffsets.some((index) => !points[ids[index]] || (points[ids[index]].visibility ?? 0) < 0.55)) {
-      pauseTracking("ยังเห็นร่างกายไม่ครบ ลองถอยกล้องหรือเพิ่มแสง");
+    if (requiredOffsets.some((index) => !points[ids[index]] || (points[ids[index]].visibility ?? 0) < minimumVisibility)) {
+      pauseTracking("ยังเห็นร่างกายไม่ครบ ลองถอยกล้องหรือเพิ่มแสง", now);
       return;
     }
-    const elbow = angle(points[ids[0]], points[ids[1]], points[ids[2]]);
-    const body = angle(points[ids[0]], points[ids[3]], points[ids[5]]);
-
     if (exercise.id === "plank" || exercise.id === "side-plank") {
+      const body = angle(points[ids[0]], points[ids[3]], points[ids[5]]);
       const knee = angle(points[ids[3]], points[ids[4]], points[ids[5]]);
+      const elbow = angle(points[ids[0]], points[ids[1]], points[ids[2]]);
       const valid = exercise.id === "plank" ? plankValid(body, knee, elbow) : sidePlankValid(body, elbow) && knee >= 145;
+      setMotionSignal(`แนวลำตัว ${Math.round(body)}° · เข่า ${Math.round(knee)}°`);
       if (!valid) {
-        pauseTracking("จัดศอกใต้ไหล่และรักษาแนวลำตัวให้ตรง เวลาจะหยุดไว้ก่อน");
+        pauseTracking("จัดศอกใต้ไหล่และรักษาแนวลำตัวให้ตรง เวลาจะหยุดไว้ก่อน", now, false);
         return;
       }
-      const hold = advanceHold({ stable: stable.current, heldMs: heldMs.current, lastValidAt: lastValidAt.current }, true, now);
-      stable.current = hold.stable;
-      heldMs.current = hold.heldMs;
-      lastValidAt.current = hold.lastValidAt;
+      const hold = advanceHold(holdState.current, true, now);
+      holdState.current = hold;
       for (let second = 0; second < hold.seconds; second++) callback.current();
       setFeedback(hold.stable < 2 ? "รักษาท่านี้ไว้" : "ท่าถูกต้อง กำลังจับเวลา");
       return;
@@ -185,8 +187,9 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
       const hip = angle(points[ids[0]], points[ids[3]], points[ids[4]]);
       const torsoTilt = Math.abs(points[ids[0]].x - points[ids[3]].x) / Math.max(0.01, Math.abs(points[ids[0]].y - points[ids[3]].y));
       const zones = exercise.id === "squat" ? squatZones(knee, hip) : lungeZones(knee, torsoTilt);
-      if ("valid" in zones && !zones.valid) { pauseTracking("ตั้งลำตัวให้ตรงก่อนนับ"); return; }
-      processRepetition(zones.top, zones.bottom, {
+      setMotionSignal(`มุมเข่า ${Math.round(knee)}°${exercise.id === "squat" ? ` · สะโพก ${Math.round(hip)}°` : ""}`);
+      if ("valid" in zones && !zones.valid) { pauseTracking("ตั้งลำตัวให้ตรงก่อนนับ", now, false); return; }
+      processRepetition(zones.top, zones.bottom, now, {
         start: "เริ่มจากท่ายืนตรง ให้เห็นสะโพก เข่า และข้อเท้า",
         down: exercise.id === "squat" ? "ย่อตัวอีกนิดจนเข่างอชัดเจน" : "ก้าวและย่อเข่าให้ชัดเจน",
         up: "ดีมาก ลุกกลับขึ้นจนยืนตรง",
@@ -197,20 +200,22 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
 
     if (exercise.id === "glute-bridge") {
       const shoulderHipKnee = angle(points[ids[0]], points[ids[3]], points[ids[4]]);
-      const hipLift = points[ids[0]].y - points[ids[3]].y;
+      const hipLift = relativeBridgeLift(points[ids[0]], points[ids[3]], points[ids[4]]);
       const zones = bridgeZones(shoulderHipKnee, hipLift);
-      processRepetition(zones.bottom, zones.top, { start: "เริ่มจากสะโพกใกล้พื้น", down: "กดส้นเท้าและยกสะโพกขึ้น", up: "ลดสะโพกลงอย่างช้า ๆ", next: "นับแล้ว! ยกสะโพกอีกครั้ง" });
+      setMotionSignal(`แนวสะโพก ${Math.round(shoulderHipKnee)}° · ระดับยก ${Math.round(hipLift * 100)}% ของลำตัว`);
+      processRepetition(zones.bottom, zones.top, now, { start: "เริ่มจากสะโพกใกล้พื้น", down: "กดส้นเท้าและยกสะโพกขึ้น", up: "ลดสะโพกลงอย่างช้า ๆ", next: "นับแล้ว! ยกสะโพกอีกครั้ง" });
       return;
     }
 
-    const zones = exercise.id === "knee-push-up" ? kneePushUpZones(elbow, angle(points[ids[0]], points[ids[3]], points[ids[4]])) : pushUpZones(elbow, body);
-    if (!zones.valid) { pauseTracking("เกร็งลำตัวให้ตรงก่อนนับครั้ง"); return; }
-    processRepetition(zones.top, zones.bottom, {
-      start: "เริ่มจากแขนเหยียดและลำตัวตรง",
-      down: "ลงอีกนิดจนศอกงอชัดเจน",
-      up: "ดีมาก ดันกลับขึ้นให้สุด",
-      next: "นับแล้ว! ลงสำหรับครั้งถัดไป",
-    });
+    const elbow = angle(points[ids[0]], points[ids[1]], points[ids[2]]);
+    const body = angle(points[ids[0]], points[ids[3]], points[exercise.id === "knee-push-up" ? ids[4] : ids[5]]);
+    const zones = exercise.id === "knee-push-up" ? kneePushUpZones(elbow, body) : pushUpZones(elbow, body);
+    const next = advancePushUp(pushUpState.current, elbow, zones.valid, now);
+    pushUpState.current = next;
+    setMotionSignal(`มุมศอก ${Math.round(elbow)}° · ${next.phase === "find" ? "เหยียดแขนเพื่อเริ่ม" : next.phase === "top" ? "รอจังหวะลง" : "รอดันกลับขึ้น"}`);
+    if (!zones.valid) { setFeedback("รักษาแนวไหล่ถึงสะโพกให้ตรงก่อนนับ"); return; }
+    if (next.counted) callback.current();
+    setFeedback(next.counted ? "นับแล้ว! ลงสำหรับครั้งถัดไป" : next.phase === "find" ? "เหยียดแขนเพื่อเริ่มนับ" : next.phase === "bottom" ? "ดีมาก ดันกลับขึ้นให้สุด" : "งอศอกลงให้ลึก แล้วดันกลับขึ้น");
   };
 
   const loop = (now: number) => {
@@ -227,10 +232,10 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
         }
         else {
           setDetectedPoints(0);
-          pauseTracking("ไม่พบตัวคนในภาพ ลองถอยกล้อง");
+          pauseTracking("ไม่พบตัวคนในภาพ ลองถอยกล้อง", now);
           canvas.current?.getContext("2d")?.clearRect(0, 0, canvas.current.width, canvas.current.height);
         }
-      } catch { setDetectedPoints(0); setFeedback("กำลังปรับการตรวจจับ ลองขยับกล้องเล็กน้อย"); }
+      } catch { setDetectedPoints(0); pauseTracking("กำลังปรับการตรวจจับ ลองขยับกล้องเล็กน้อย", now); }
     }
     frame.current = window.requestAnimationFrame(loop);
   };
@@ -239,6 +244,12 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     const token = ++requestToken.current;
     setStatus("loading");
     setDetectedPoints(-1);
+    repState.current = initialCameraRepState;
+    pushUpState.current = initialPushUpState;
+    highKneeState.current = initialHighKneeState;
+    holdState.current = { stable: 0, heldMs: 0, lastValidAt: null, lastGoodAt: null };
+    trackedSide.current = null;
+    setMotionSignal(null);
     setError("");
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("เบราว์เซอร์นี้เปิดกล้องไม่ได้ กรุณาใช้ HTTPS หรือ localhost");
@@ -288,6 +299,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
         {status !== "active" && <div className="camera-placeholder"><Camera size={34} /><span>วางกล้อง{exercise.cameraAngle}ให้เห็นทั้งตัว</span></div>}
       </div>
       <p className="camera-feedback" aria-live="polite">{status === "error" ? error : feedback}</p>
+      {status === "active" && motionSignal && <p className="camera-angle-readout">{motionSignal}</p>}
       <div className="camera-actions">
         {status === "active" || status === "loading" || status === "waiting" ? <button className="button button--dark" onClick={stop}><CameraOff size={17} /> {status === "active" ? "ปิดกล้อง" : "ยกเลิก"}</button>
           : <button className="button button--lime" onClick={start}><Camera size={17} /> {exercise.unit === "วินาที" ? "เปิดกล้องจับเวลา" : "เปิดกล้องนับครั้ง"}</button>}
