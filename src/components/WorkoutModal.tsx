@@ -33,7 +33,7 @@ function RestCountdown({ remaining, total, nextSet, onSkip }: { remaining: numbe
 export function WorkoutModal({ exercise, entries, onClose, onSave }: Props) {
   const [value, setValue] = useState(0);
   const [mode, setMode] = useState<"manual" | "camera">("manual");
-  const [side, setSide] = useState<Side>("left");
+  const [side, setSide] = useState<Side>(() => entries.filter((entry) => entry.side === "left").length > entries.filter((entry) => entry.side === "right").length ? "right" : "left");
   const [running, setRunning] = useState(false);
   const [stage, setStage] = useState<WorkoutStage>("training");
   const [restUntil, setRestUntil] = useState<number | null>(null);
@@ -67,21 +67,21 @@ export function WorkoutModal({ exercise, entries, onClose, onSave }: Props) {
   const completeSet = (setValueToSave: number, source: SetEntry["source"]) => {
     if (setValueToSave <= 0 || stageRef.current !== "training") return;
     const nextSide: Side = side === "left" ? "right" : "left";
-    const hasNext = exercise.bilateral
-      ? !entries.some((entry) => entry.side === nextSide)
-      : entries.length + 1 < exercise.sets;
+    const hasNext = entries.length + 1 < exercise.sets;
 
-    stageRef.current = hasNext ? "rest" : "complete";
+    stageRef.current = hasNext && exercise.rest > 0 ? "rest" : hasNext ? "training" : "complete";
     onSave(setValueToSave, source, exercise.bilateral ? side : undefined);
     setValue(0);
     cameraCount.current = 0;
     setRunning(false);
     if (hasNext) {
       if (exercise.bilateral) setSide(nextSide);
-      const now = Date.now();
-      setRestNow(now);
-      setRestUntil(now + exercise.rest * 1000);
-      setStage("rest");
+      if (exercise.rest > 0) {
+        const now = Date.now();
+        setRestNow(now);
+        setRestUntil(now + exercise.rest * 1000);
+        setStage("rest");
+      }
     } else {
       setStage("complete");
     }

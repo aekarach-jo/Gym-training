@@ -1,5 +1,8 @@
-import type { ExerciseId } from "./exercises";
+import type { ExerciseId } from "./exercises.ts";
 export type PlanId = "starter" | "strength" | "cardio";
+export type PlanExercise = { exerciseId: ExerciseId; sets: number; target: number; rest: number };
+export type CustomPlan = { name: string; trainingDays: number[]; items: PlanExercise[] };
+export const weekdays = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 export type TrainingPlan = { id: PlanId; name: string; subtitle: string; duration: string; days: string; exerciseIds: ExerciseId[]; accent: string };
 export const plans: TrainingPlan[] = [
   { id: "starter", name: "เริ่มต้นทั้งตัว", subtitle: "ค่อย ๆ สร้างพื้นฐานให้ครบทุกส่วน", duration: "20–25 นาที", days: "3 วัน/สัปดาห์", exerciseIds: ["knee-push-up", "squat", "glute-bridge", "plank"], accent: "lime" },
