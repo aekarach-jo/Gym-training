@@ -1,8 +1,9 @@
 import type { PoseLandmarker as PoseLandmarkerType } from "@mediapipe/tasks-vision";
 
 const XNNPACK_INFO = "INFO: Created TensorFlow Lite XNNPACK delegate for CPU.";
+let poseModelPromise: Promise<PoseLandmarkerType> | null = null;
 
-export async function createPoseModel(): Promise<PoseLandmarkerType> {
+async function loadPoseModel(): Promise<PoseLandmarkerType> {
   const { FilesetResolver, PoseLandmarker } = await import("@mediapipe/tasks-vision");
   const vision = await FilesetResolver.forVisionTasks("/wasm");
 
@@ -32,4 +33,16 @@ export async function createPoseModel(): Promise<PoseLandmarkerType> {
     minPosePresenceConfidence: 0.4,
     minTrackingConfidence: 0.4,
   });
+}
+
+export function createPoseModel(): Promise<PoseLandmarkerType> {
+  // Reuse the WASM task across camera sessions. MediaPipe's close() can throw
+  // after video inference, so releasing the camera must not destroy the task.
+  if (!poseModelPromise) {
+    poseModelPromise = loadPoseModel().catch((error) => {
+      poseModelPromise = null;
+      throw error;
+    });
+  }
+  return poseModelPromise;
 }

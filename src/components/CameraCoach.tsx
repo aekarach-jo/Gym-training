@@ -47,8 +47,8 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     window.cancelAnimationFrame(frame.current);
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
-    model.current?.close();
     model.current = null;
+    if (video.current) { video.current.pause(); video.current.srcObject = null; }
     repState.current = initialCameraRepState;
     pushUpState.current = initialPushUpState;
     highKneeState.current = initialHighKneeState;
@@ -65,7 +65,9 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     live.current = false;
     window.cancelAnimationFrame(frame.current);
     stream.current?.getTracks().forEach((track) => track.stop());
-    model.current?.close();
+    stream.current = null;
+    model.current = null;
+    if (video.current) { video.current.pause(); video.current.srcObject = null; }
   }, []);
 
   const draw = (points: Point[]) => {
@@ -254,7 +256,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("เบราว์เซอร์นี้เปิดกล้องไม่ได้ กรุณาใช้ HTTPS หรือ localhost");
       const nextModel = await createPoseModel();
-      if (token !== requestToken.current) { nextModel.close(); return; }
+      if (token !== requestToken.current) return;
       model.current = nextModel;
       setStatus("waiting");
       setFeedback("กรุณาอนุญาตให้เว็บไซต์ใช้กล้องในเบราว์เซอร์");
@@ -264,6 +266,7 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
       if (!video.current) throw new Error("ไม่สามารถแสดงภาพจากกล้องได้");
       video.current.srcObject = stream.current;
       await video.current.play();
+      if (token !== requestToken.current) return;
       live.current = true;
       setStatus("active");
       setFeedback(`วางกล้อง${exercise.cameraAngle} ให้เห็นตั้งแต่ศีรษะถึงเท้า`);
@@ -271,8 +274,9 @@ export function CameraCoach({ exercise, count, onCount, selectedSide = "left" }:
     } catch (reason) {
       if (token !== requestToken.current) return;
       stream.current?.getTracks().forEach((track) => track.stop());
-      model.current?.close();
+      stream.current = null;
       model.current = null;
+      if (video.current) { video.current.pause(); video.current.srcObject = null; }
       setStatus("error");
       setError(reason instanceof DOMException && reason.name === "NotAllowedError"
         ? "ยังไม่ได้รับสิทธิ์กล้อง กรุณาอนุญาตในเบราว์เซอร์แล้วลองใหม่"
