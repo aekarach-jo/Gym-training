@@ -1,69 +1,106 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, CalendarDays, Camera, Check, CheckCircle2, ChevronLeft, Clock3, Dumbbell, Flame, Home, Minus, Pause, Play, Plus, Scale, Settings2, ShieldCheck, Sparkles, Target, Trophy, Upload, X } from "lucide-react";
+import { CameraCoach } from "@/components/CameraCoach";
+import { ExerciseArt } from "@/components/ExerciseArt";
+import { WeightTracker } from "@/components/WeightTracker";
+import { byId, exercises, type Exercise, type ExerciseId } from "@/lib/exercises";
+import { byPlanId, plans, type PlanId } from "@/lib/plans";
+import { importData, initialData, readData, saveData, type SetEntry, type TrainingData } from "@/lib/storage";
+
+type Tab = "today" | "plans" | "exercises" | "challenges" | "history" | "weight" | "settings";
+const tabs: { id: Tab; label: string; Icon: typeof Home }[] = [
+  { id: "today", label: "วันนี้", Icon: Home }, { id: "plans", label: "แผนฝึก", Icon: CalendarDays }, { id: "exercises", label: "ท่าฝึก", Icon: Dumbbell },
+  { id: "challenges", label: "ชาเลนจ์", Icon: Trophy }, { id: "history", label: "ประวัติ", Icon: Activity }, { id: "weight", label: "น้ำหนัก", Icon: Scale },
+  { id: "settings", label: "ตั้งค่า", Icon: Settings2 },
+];
+const localDay = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const entryDay = (entry: SetEntry) => localDay(new Date(entry.at));
+const dateLabel = (date: Date) => new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "long", year: "numeric" }).format(date);
+const createId = () => crypto.randomUUID();
+const completedForExercise = (exercise: Exercise, entries: SetEntry[]) => exercise.bilateral
+  ? Number(entries.some((entry) => entry.exerciseId === exercise.id && entry.side === "left")) + Number(entries.some((entry) => entry.exerciseId === exercise.id && entry.side === "right"))
+  : Math.min(exercise.sets, entries.filter((entry) => entry.exerciseId === exercise.id).length);
+
+export default function HomePage() {
+  const [tab, setTab] = useState<Tab>("today");
+  const [data, setData] = useState<TrainingData>(initialData);
+  const [loaded, setLoaded] = useState(false);
+  const [selected, setSelected] = useState<ExerciseId | null>(null);
+  const [preview, setPreview] = useState<ExerciseId | null>(null);
+  const [filter, setFilter] = useState("ทั้งหมด");
+  const [toast, setToast] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const today = localDay(new Date());
+  useEffect(() => { const frame = requestAnimationFrame(() => { setData(readData()); setLoaded(true); }); return () => cancelAnimationFrame(frame); }, []);
+  useEffect(() => { if (loaded) saveData(data); }, [data, loaded]);
+  useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(""), 3200); return () => clearTimeout(timer); }, [toast]);
+  useEffect(() => { window.scrollTo({ top: 0, behavior: "instant" }); }, [tab]);
+  useEffect(() => { document.body.style.overflow = selected || preview ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [selected, preview]);
+
+  const todayEntries = useMemo(() => data.entries.filter((entry) => entryDay(entry) === today), [data.entries, today]);
+  const activePlan = byPlanId(data.activePlanId);
+  const planExercises = activePlan.exerciseIds.map(byId);
+  const pushupToday = todayEntries.filter((entry) => entry.exerciseId === "push-up").reduce((sum, entry) => sum + entry.value, 0);
+  const completedSets = planExercises.reduce((sum, exercise) => sum + completedForExercise(exercise, todayEntries), 0);
+  const totalSets = planExercises.reduce((sum, exercise) => sum + exercise.sets, 0);
+  const daysActive = new Set(data.entries.map(entryDay)).size;
+  const totalReps = data.entries.filter((entry) => byId(entry.exerciseId).unit === "ครั้ง").reduce((sum, entry) => sum + entry.value, 0);
+  const progress = Math.min(100, Math.round((completedSets / totalSets) * 100));
+  const challengeDone = pushupToday >= data.challengeGoal;
+  const addEntry = (id: ExerciseId, value: number, source: SetEntry["source"], side?: SetEntry["side"]) => {
+    if (!Number.isFinite(value) || value <= 0) return;
+    setData((current) => ({ ...current, entries: [{ id: createId(), exerciseId: id, value: Math.round(value), source, side, at: new Date().toISOString() }, ...current.entries] }));
+    setToast(`บันทึก ${byId(id).name} ${value} ${byId(id).unit} แล้ว`);
+  };
+  const exportBackup = () => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = `gym-training-backup-${today}.json`; a.click(); URL.revokeObjectURL(url);
+    setToast("ดาวน์โหลดไฟล์สำรองแล้ว");
+  };
+  const restoreBackup = async (file?: File) => {
+    if (!file) return;
+    try { const parsed = importData(JSON.parse(await file.text())); if (!parsed) throw new Error(); setData(parsed); setToast("นำเข้าข้อมูลสำเร็จ"); }
+    catch { setToast("ไฟล์สำรองไม่ถูกต้อง"); }
+    if (fileInput.current) fileInput.current.value = "";
+  };
+
+  return <div className="app-shell">
+    <aside className="sidebar"><div className="brand"><span className="brand-mark"><Activity size={25} strokeWidth={2.8} /></span><span>FORM<span className="brand-accent">.</span><small>TRAINING SPACE</small></span></div><div className="sidebar-section">เมนูหลัก</div><nav className="side-nav" aria-label="เมนูหลัก">{tabs.map(({ id, label, Icon }) => <button key={id} className={`nav-item ${tab === id ? "active" : ""}`} onClick={() => setTab(id)}><Icon size={19} /><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="sidebar-quote"><Sparkles size={20} /><strong>สร้างความสม่ำเสมอ</strong><span>เริ่มจากเซตเล็ก ๆ ในทุกวัน</span></div><div className="local-badge"><ShieldCheck size={16} /> ข้อมูลเก็บในเครื่องนี้</div></div></aside>
+    <div className="main-column"><header className="topbar"><div className="topbar-breadcrumb">พื้นที่ฝึกของฉัน <span>/</span> <strong>{tabs.find((item) => item.id === tab)?.label}</strong></div><div className="topbar-right"><span className="today-date"><CalendarDays size={17} /> {dateLabel(new Date())}</span><span className="avatar">G</span></div></header><main className="page-content">
+      {tab === "today" && <><div className="page-intro"><div><span className="eyebrow"><span className="eyebrow-line" /> YOUR DAILY TRAINING</span><h1>พร้อมลุยวันนี้ไหม<span className="heading-lime">?</span></h1><p>แผนฝึกง่าย ๆ สำหรับเริ่มต้น ดูท่าให้ชัด แล้วลงมือทำทีละเซต</p></div><div className="intro-date"><span>วันนี้</span><strong>{new Date().getDate()}</strong><span>{new Intl.DateTimeFormat("th-TH", { month: "short" }).format(new Date())}</span></div></div>
+        <section className="hero-card"><div className="hero-copy"><div className="hero-tag"><span className="live-dot" /> แผนฝึกที่เลือก</div><h2>{activePlan.name}<br /><em>เริ่มทีละเซต</em></h2><p>{planExercises.length} ท่า · {activePlan.duration} · ไม่ใช้อุปกรณ์</p><button className="button button--lime hero-button" onClick={() => setSelected(activePlan.exerciseIds[0])}>เริ่มฝึกเลย <ArrowRight size={19} /></button></div><div className="hero-visual"><div className="hero-ring hero-ring--outer" /><div className="hero-ring hero-ring--inner" /><div className="hero-image"><ExerciseArt exercise={exercises[1]} size="large" /></div><div className="hero-floating"><Flame size={17} /> วันนี้ทำแล้ว <strong>{completedSets} เซต</strong></div></div></section>
+        <section className="stats-grid" aria-label="สรุปการฝึก"><div className="stat-card"><div className="stat-icon stat-icon--lime"><Target size={20} /></div><div><span>ความคืบหน้าวันนี้</span><strong>{progress}<small>%</small></strong></div><div className="mini-progress"><span style={{ width: `${progress}%` }} /></div></div><div className="stat-card"><div className="stat-icon stat-icon--blue"><CheckCircle2 size={20} /></div><div><span>เซตที่ทำแล้ว</span><strong>{completedSets}<small>/{totalSets}</small></strong></div><small className="stat-note">ตามแผนวันนี้</small></div><div className="stat-card"><div className="stat-icon stat-icon--orange"><Flame size={20} /></div><div><span>วันที่ออกกำลังกาย</span><strong>{daysActive}<small> วัน</small></strong></div><small className="stat-note">ทั้งหมดที่บันทึก</small></div></section>
+        <div className="content-grid"><section className="card-panel workout-panel"><div className="section-heading"><div><span className="section-kicker">TODAY’S PLAN</span><h2>{activePlan.name}</h2></div><button className="section-link" onClick={() => setTab("plans")}>เปลี่ยนแผน <ArrowRight size={15} /></button></div><div className="workout-list">{planExercises.map((exercise, index) => { const sets = completedForExercise(exercise, todayEntries); return <button key={exercise.id} className="workout-row" onClick={() => setSelected(exercise.id)}><span className="row-number">0{index + 1}</span><span className="row-art"><ExerciseArt exercise={exercise} /></span><span className="row-details"><strong>{exercise.name}</strong><small>{exercise.muscles}</small><span>{exercise.bilateral ? "ข้างละ 1" : exercise.sets} เซต × {exercise.target} {exercise.unit}</span></span><span className={`row-status ${sets >= exercise.sets ? "row-status--done" : ""}`}>{sets >= exercise.sets ? <Check size={17} /> : `${sets}/${exercise.sets}`}</span><ArrowUpRight className="row-arrow" size={18} /></button>; })}</div></section><section className="right-stack"><div className="challenge-card"><div className="challenge-icon"><Trophy size={24} /></div><span className="section-kicker">DAILY CHALLENGE</span><h2>วิดพื้นให้ครบ<br />{data.challengeGoal} ครั้งวันนี้</h2><p>นับสะสมจากทุกเซตที่ฝึกวันนี้</p><div className="challenge-progress"><span style={{ width: `${Math.min(100, (pushupToday / data.challengeGoal) * 100)}%` }} /></div><div className="challenge-footer"><strong>{pushupToday}/{data.challengeGoal} ครั้ง</strong><span>{challengeDone ? "สำเร็จแล้ว!" : "ทำต่อได้เลย"}</span></div><button className="challenge-link" onClick={() => setSelected("push-up")}>เริ่มวิดพื้น <ArrowRight size={16} /></button></div><div className="tip-card"><span className="tip-symbol"><Sparkles size={20} /></span><div><strong>เคล็ดลับวันนี้</strong><p>เน้นทำท่าให้ครบช่วงอย่างควบคุม ไม่ต้องรีบทำให้เร็ว</p></div></div></section></div></>}
+      {tab === "plans" && <><PageTitle eyebrow="YOUR TRAINING PLAN" title="เลือกแผนฝึก" description="เลือกแผนให้เข้ากับวันนี้ แล้วฝึกทีละท่าตามลำดับ" /><div className="plan-grid">{plans.map((plan) => { const chosen = data.activePlanId === plan.id; return <article className={`plan-card plan-card--${plan.accent} ${chosen ? "chosen" : ""}`} key={plan.id}><div className="plan-card-top"><span className="plan-number">0{plans.indexOf(plan) + 1} / PLAN</span>{chosen && <span className="plan-active"><Check size={14} /> แผนที่ใช้อยู่</span>}</div><h2>{plan.name}</h2><p>{plan.subtitle}</p><div className="plan-meta"><span><Clock3 size={15} /> {plan.duration}</span><span><CalendarDays size={15} /> {plan.days}</span></div><div className="plan-exercises">{plan.exerciseIds.map((id, index) => <div key={id}><span>{String(index + 1).padStart(2, "0")}</span><strong>{byId(id).name}</strong><small>{byId(id).bilateral ? 1 : byId(id).sets} × {byId(id).target} {byId(id).unit}{byId(id).bilateral ? " / ข้าง" : ""}</small></div>)}</div><button className={`button button--full ${chosen ? "button--dark" : "button--lime"}`} onClick={() => { setData((current) => ({ ...current, activePlanId: plan.id as PlanId })); setTab("today"); setToast(`เลือกแผน${plan.name}แล้ว`); }}>{chosen ? "กลับไปฝึกตามแผน" : "ใช้แผนนี้"} <ArrowRight size={17} /></button></article>; })}</div><p className="plan-footnote">แนะนำให้เว้นวันพักระหว่างวันฝึกแรงต้าน และปรับจำนวนครั้งตามความพร้อมของตัวเอง</p></>}
+      {tab === "exercises" && <><PageTitle eyebrow="EXERCISE LIBRARY" title="คลังท่าฝึก" description="เลือกท่าที่ต้องการ ดูภาพสาธิตและเริ่มบันทึกผลได้ทันที" /><div className="filter-row">{["ทั้งหมด", "ช่วงบน", "ช่วงล่าง", "แกนกลาง", "คาร์ดิโอ"].map((item) => <button key={item} className={`filter-chip ${filter === item ? "selected" : ""}`} onClick={() => setFilter(item)}>{item}</button>)}</div><div className="exercise-grid">{exercises.filter((exercise) => filter === "ทั้งหมด" || exercise.category === filter).map((exercise) => <article className="exercise-card" key={exercise.id}><div className="exercise-card-art"><ExerciseArt exercise={exercise} /><span className="exercise-level">{exercise.difficulty}</span></div><div className="exercise-card-body"><span className="section-kicker">{exercise.category}</span><h2>{exercise.name}</h2><p>{exercise.muscles}</p><div className="exercise-card-footer"><span>{exercise.bilateral ? "ข้างละ 1" : exercise.sets} เซต × {exercise.target} {exercise.unit}</span><button aria-label={`ดูท่า${exercise.name}`} onClick={() => setPreview(exercise.id)}><ArrowUpRight size={19} /></button></div></div></article>)}</div></>}
+      {tab === "challenges" && <><PageTitle eyebrow="STAY CONSISTENT" title="ชาเลนจ์ของฉัน" description="เป้าหมายเล็ก ๆ ที่ทำได้ทุกวัน ช่วยให้ฝึกต่อเนื่อง" /><div className="challenge-page-grid"><div className="challenge-feature"><span className="challenge-badge"><Trophy size={18} /> DAILY CHALLENGE</span><h2>วิดพื้น<br /><em>{data.challengeGoal} ครั้ง</em> ในวันนี้</h2><p>ทุกครั้งที่บันทึกท่าวิดพื้นจะถูกนับรวมในชาเลนจ์นี้</p><div className="big-progress"><div className="big-progress-bar"><span style={{ width: `${Math.min(100, (pushupToday / data.challengeGoal) * 100)}%` }} /></div><strong>{pushupToday} <small>/ {data.challengeGoal} ครั้ง</small></strong></div><button className="button button--lime" onClick={() => setSelected("push-up")}>{challengeDone ? "ฝึกต่ออีกเซต" : "ไปทำชาเลนจ์"} <ArrowRight size={18} /></button></div><div className="card-panel challenge-config"><div className="stat-icon stat-icon--lime"><Target size={21} /></div><h2>ตั้งเป้าหมายของคุณ</h2><p>ปรับจำนวนวิดพื้นต่อวันให้พอดีกับระดับของตัวเอง</p><div className="goal-control"><button aria-label="ลดเป้าหมาย" onClick={() => setData((current) => ({ ...current, challengeGoal: Math.max(1, current.challengeGoal - 1) }))}><Minus size={19} /></button><strong>{data.challengeGoal} <small>ครั้ง/วัน</small></strong><button aria-label="เพิ่มเป้าหมาย" onClick={() => setData((current) => ({ ...current, challengeGoal: Math.min(100, current.challengeGoal + 1) }))}><Plus size={19} /></button></div><div className="config-note"><CheckCircle2 size={18} /> {challengeDone ? "คุณทำเป้าหมายวันนี้สำเร็จแล้ว" : `เหลืออีก ${Math.max(0, data.challengeGoal - pushupToday)} ครั้งเพื่อทำเป้าหมายวันนี้`}</div></div></div><section className="card-panel week-panel"><div className="section-heading"><div><span className="section-kicker">THIS WEEK</span><h2>ความสม่ำเสมอ 7 วันล่าสุด</h2></div></div><div className="week-grid">{Array.from({ length: 7 }, (_, index) => { const date = new Date(); date.setDate(date.getDate() - 6 + index); const key = localDay(date); const done = data.entries.some((entry) => entryDay(entry) === key); return <div className={`week-day ${done ? "done" : ""} ${key === today ? "current" : ""}`} key={key}><span>{new Intl.DateTimeFormat("th-TH", { weekday: "short" }).format(date)}</span><strong>{date.getDate()}</strong><div>{done ? <Check size={18} /> : null}</div></div>; })}</div></section></>}
+      {tab === "history" && <><PageTitle eyebrow="YOUR PROGRESS" title="ประวัติการฝึก" description="ทุกเซตที่ทำคือความก้าวหน้าของคุณ" /><section className="stats-grid history-stats"><div className="stat-card"><div className="stat-icon stat-icon--lime"><Dumbbell size={20} /></div><div><span>เซตทั้งหมด</span><strong>{data.entries.length}</strong></div></div><div className="stat-card"><div className="stat-icon stat-icon--blue"><Activity size={20} /></div><div><span>จำนวนครั้งทั้งหมด</span><strong>{totalReps}</strong></div></div><div className="stat-card"><div className="stat-icon stat-icon--orange"><CalendarDays size={20} /></div><div><span>วันที่ฝึก</span><strong>{daysActive}</strong></div></div></section><section className="card-panel history-panel"><div className="section-heading"><div><span className="section-kicker">ACTIVITY LOG</span><h2>บันทึกล่าสุด</h2></div></div>{data.entries.length ? <div className="history-list">{data.entries.slice(0, 30).map((entry) => <div className="history-row" key={entry.id}><div className="history-icon"><Check size={18} /></div><div><strong>{byId(entry.exerciseId).name}</strong><small>{new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(entry.at))} · {entry.source === "camera" ? "กล้อง" : entry.source === "timer" ? "จับเวลา" : "บันทึกเอง"}{entry.side ? ` · ข้าง${entry.side === "left" ? "ซ้าย" : "ขวา"}` : ""}</small></div><span>{entry.value} {byId(entry.exerciseId).unit}</span><button title="ลบบันทึกนี้" aria-label={`ลบบันทึก${byId(entry.exerciseId).name}`} onClick={() => setData((current) => ({ ...current, entries: current.entries.filter((item) => item.id !== entry.id) }))}><X size={16} /></button></div>)}</div> : <div className="empty-state"><Dumbbell size={30} /><h3>ยังไม่มีประวัติการฝึก</h3><p>เริ่มฝึกเซตแรก แล้วผลจะมาแสดงที่นี่</p><button className="button button--lime" onClick={() => setTab("today")}>ไปหน้าแผนวันนี้ <ArrowRight size={17} /></button></div>}</section></>}
+      {tab === "weight" && <><PageTitle eyebrow="BODY PROGRESS" title="ติดตามน้ำหนัก" description="บันทึกตามวันที่จริง ดูแนวโน้ม และตั้งเป้าหมายที่เหมาะกับตัวเอง" /><WeightTracker weights={data.weights} goal={data.weightGoalKg} onNotice={setToast} onAdd={(date, kg) => setData((current) => ({ ...current, weights: [...current.weights.filter((item) => item.date !== date), { id: createId(), date, kg }].sort((a, b) => a.date.localeCompare(b.date)) }))} onGoal={(kg) => setData((current) => ({ ...current, weightGoalKg: kg }))} onDelete={(id) => setData((current) => ({ ...current, weights: current.weights.filter((item) => item.id !== id) }))} /></>}
+      {tab === "settings" && <><PageTitle eyebrow="YOUR SPACE" title="ตั้งค่าและข้อมูล" description="ดูแลข้อมูลการฝึกที่เก็บไว้บนอุปกรณ์ของคุณ" /><div className="settings-grid"><section className="card-panel settings-card"><div className="settings-icon"><ShieldCheck size={26} /></div><h2>ข้อมูลอยู่ในเครื่องนี้</h2><p>ประวัติการฝึก แผน และน้ำหนักเก็บในเบราว์เซอร์ ไม่มีบัญชีผู้ใช้และไม่มีการส่งวิดีโอกล้องไปเก็บบนเซิร์ฟเวอร์ หากเปลี่ยนเครื่องหรือเคลียร์ข้อมูลเบราว์เซอร์ ให้สำรองไฟล์ไว้ก่อน</p><div className="settings-actions"><button className="button button--lime" onClick={exportBackup}><ArrowDownToLine size={18} /> ส่งออกข้อมูล</button><button className="button button--outline" onClick={() => fileInput.current?.click()}><Upload size={18} /> นำเข้าข้อมูล</button><input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={(event) => restoreBackup(event.target.files?.[0])} /></div></section><section className="card-panel settings-card"><div className="settings-icon settings-icon--blue"><Camera size={26} /></div><h2>การใช้กล้อง</h2><p>กล้องเปิดเมื่อคุณกดอนุญาตเท่านั้น ระบบวิเคราะห์ท่าบนอุปกรณ์ขณะใช้งาน และปิดกล้องเมื่อออกจากโหมดฝึก คำแนะนำจากกล้องเป็นการประเมินคร่าว ๆ ตามมุมภาพ</p><div className="settings-note"><span className="live-dot" /> พร้อมใช้กับทั้ง 9 ท่า</div></section></div></>}
+    </main></div>
+    <nav className="mobile-nav" aria-label="เมนูหลักมือถือ">{tabs.map(({ id, label, Icon }) => <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}><Icon size={21} /><span>{label}</span></button>)}</nav>
+    {toast && <div className="toast" role="status"><CheckCircle2 size={18} /> {toast}</div>}
+    {selected && <WorkoutModal key={selected} exercise={byId(selected)} entries={todayEntries.filter((entry) => entry.exerciseId === selected)} onClose={() => setSelected(null)} onSave={(value, source, side) => addEntry(selected, value, source, side)} />}
+    {preview && <ExerciseModal exercise={byId(preview)} onClose={() => setPreview(null)} onStart={() => { setSelected(preview); setPreview(null); }} />}
+  </div>;
+}
+
+function PageTitle({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) { return <div className="page-title"><span className="eyebrow"><span className="eyebrow-line" /> {eyebrow}</span><h1>{title}<span className="heading-lime">.</span></h1><p>{description}</p></div>; }
+
+function ExerciseModal({ exercise, onClose, onStart }: { exercise: Exercise; onClose: () => void; onStart: () => void }) { return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal-card exercise-modal" role="dialog" aria-modal="true" aria-label={`วิธีทำท่า${exercise.name}`} onMouseDown={(event) => event.stopPropagation()}><div className="modal-top"><span className="section-kicker">EXERCISE GUIDE</span><button aria-label="ปิด" onClick={onClose}><X size={21} /></button></div><div className="guide-art"><ExerciseArt exercise={exercise} size="large" /></div><div className="modal-body"><span className="exercise-category">{exercise.category} · {exercise.difficulty}</span><h2>{exercise.name}</h2><p>{exercise.cue}</p><h3>วิธีทำ</h3><ol>{exercise.steps.map((step) => <li key={step}>{step}</li>)}</ol><button className="button button--lime button--full" onClick={onStart}>เริ่มฝึกท่านี้ <ArrowRight size={18} /></button></div></div></div>; }
+
+function WorkoutModal({ exercise, entries, onClose, onSave }: { exercise: Exercise; entries: SetEntry[]; onClose: () => void; onSave: (value: number, source: SetEntry["source"], side?: SetEntry["side"]) => void }) {
+  const [value, setValue] = useState(0);
+  const [mode, setMode] = useState<"manual" | "camera">("manual");
+  const [side, setSide] = useState<"left" | "right">("left");
+  const [running, setRunning] = useState(false);
+  const [rest, setRest] = useState(0);
+  const timed = exercise.unit === "วินาที";
+  const sideEntries = exercise.bilateral ? entries.filter((entry) => entry.side === side) : entries;
+  useEffect(() => { if (!running) return; const timer = setInterval(() => setValue((current) => current + 1), 1000); return () => clearInterval(timer); }, [running]);
+  useEffect(() => { if (rest <= 0) return; const timer = setTimeout(() => setRest((current) => Math.max(0, current - 1)), 1000); return () => clearTimeout(timer); }, [rest]);
+  const save = () => { if (value <= 0) return; onSave(value, mode === "camera" ? "camera" : timed ? "timer" : "manual", exercise.bilateral ? side : undefined); setValue(0); setRunning(false); setRest(exercise.rest); if (exercise.bilateral) setSide(side === "left" ? "right" : "left"); };
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal-card workout-modal" role="dialog" aria-modal="true" aria-label={`ฝึกท่า${exercise.name}`} onMouseDown={(event) => event.stopPropagation()}><div className="modal-top"><button className="back-button" onClick={onClose}><ChevronLeft size={20} /> กลับ</button><span className="modal-set">เซตที่ {Math.min(entries.length + 1, exercise.sets)} / {exercise.sets}</span><button className="close-button" aria-label="ปิด" onClick={onClose}><X size={21} /></button></div><div className="workout-modal-body"><div className="workout-main"><span className="section-kicker">NOW TRAINING · {exercise.category.toUpperCase()}</span><h2>{exercise.name}</h2><p>{exercise.cue}</p><div className="workout-illustration"><ExerciseArt exercise={exercise} size="large" /></div><div className="form-tip"><Sparkles size={18} /> {exercise.steps[1]}</div></div><div className="workout-controls"><div className="control-head"><span>เป้าหมายเซตนี้</span><strong>{exercise.target} {exercise.unit}{exercise.bilateral ? " / ข้าง" : ""}</strong></div>{rest > 0 && <div className="rest-banner"><Clock3 size={18} /> พักอีก {rest} วินาที <button onClick={() => setRest(0)}>ข้าม</button></div>}{exercise.bilateral && <div className="side-switch" role="group" aria-label="เลือกข้างที่ฝึก">{(["left", "right"] as const).map((option) => <button key={option} className={side === option ? "active" : ""} onClick={() => { setSide(option); setValue(0); setRunning(false); }}>{option === "left" ? "ข้างซ้าย" : "ข้างขวา"} <small>{entries.filter((entry) => entry.side === option).length} เซต</small></button>)}</div>}<div className="mode-tabs"><button className={mode === "manual" ? "active" : ""} onClick={() => setMode("manual")}>บันทึกเอง</button><button className={mode === "camera" ? "active" : ""} onClick={() => { setRunning(false); setMode("camera"); }}><Camera size={16} /> {timed ? "ใช้กล้องจับเวลา" : "ใช้กล้องนับ"}</button></div>{mode === "camera" ? <CameraCoach key={`${entries.length}-${side}`} exercise={exercise} selectedSide={side} count={value} onCount={() => setValue((current) => current + 1)} /> : <div className="reps-control"><span>{timed ? "เวลาที่ทำได้" : "จำนวนที่ทำได้"}</span><div><button aria-label="ลดจำนวน" onClick={() => setValue((current) => Math.max(0, current - 1))}><Minus size={25} /></button><strong>{value}<small>{exercise.unit}</small></strong><button aria-label="เพิ่มจำนวน" onClick={() => setValue((current) => current + 1)}><Plus size={25} /></button></div>{timed && <button className="timer-button" onClick={() => setRunning((current) => !current)}>{running ? <Pause size={16} /> : <Play size={16} />}{running ? "หยุดเวลา" : "เริ่มจับเวลา"}</button>}</div>}{mode === "camera" && <div className="camera-manual"><span>จำนวนคลาดเคลื่อน?</span><button onClick={() => setValue((current) => Math.max(0, current - 1))}><Minus size={15} /> ลบ</button><button onClick={() => setValue((current) => current + 1)}><Plus size={15} /> เพิ่ม</button></div>}<button className="button button--lime button--full save-set" onClick={save} disabled={value <= 0}>บันทึกเซตนี้ <Check size={18} /></button><div className="set-history"><span>วันนี้บันทึกแล้ว {sideEntries.length} เซต{exercise.bilateral ? ` · ${side === "left" ? "ข้างซ้าย" : "ข้างขวา"}` : ""}</span>{sideEntries.length > 0 && <div>{sideEntries.map((entry) => <strong key={entry.id}>{entry.value} {exercise.unit}</strong>)}</div>}</div></div></div></div></div>;
 }
